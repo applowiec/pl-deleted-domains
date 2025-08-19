@@ -1,5 +1,7 @@
 name: Update deleted domains
-
+on:
+  workflow_dispatch:
+  
 on:
   schedule:
     - cron: "0 8 * * *"   # codziennie o 10:00 czasu polskiego (08:00 UTC)
