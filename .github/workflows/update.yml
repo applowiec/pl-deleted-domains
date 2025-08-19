@@ -2,7 +2,7 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # 08:00 UTC (10:00 PL)
+    - cron: "0 8 * * *"   # codziennie o 10:00 czasu polskiego (08:00 UTC)
   workflow_dispatch:
 
 permissions:
@@ -15,46 +15,35 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Fetch deleted domains
-        env:
-          TZ: Europe/Warsaw
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install requirements
+        run: pip install requests
+
+      - name: Run update script
+        run: python update.py
+
+      - name: Update index
         run: |
-          set -euo pipefail
-          mkdir -p data
-          DATE=$(date +'%Y-%m-%d')
-          RAW="data/${DATE}.txt"
-          CLEAN="data/${DATE}.list"
-          MD="data/${DATE}.md"
+          INDEX="data/index.md"
+          echo "# 📅 Historia usuniętych domen (.pl)" > "$INDEX"
+          echo "" >> "$INDEX"
+          echo "Lista wszystkich dostępnych dni, dla których opublikowano usunięte domeny:" >> "$INDEX"
+          echo "" >> "$INDEX"
 
-          # pobierz plik DNS.pl
-          curl -fsSL https://dns.pl/deleted_domains.txt -o "$RAW"
+          for f in $(ls data/*.md | sort -r); do
+            DATE=$(basename "$f" .md)
+            COUNT=$(grep -c '\.pl$' "$f")
+            echo "- [${DATE}](./${DATE}.md) — usunięto ${COUNT} domen" >> "$INDEX"
+          done
 
-          # weź pierwszy wiersz (znacznik czasu źródła), usuń CR
-          SRC_TS=$(head -n1 "$RAW" | tr -d '\r')
-
-          # od drugiej linii: usuń puste wiersze/CR -> lista domen
-          tail -n +2 "$RAW" | tr -d '\r' | awk 'NF' > "$CLEAN"
-
-          # policz tylko domeny
-          COUNT=$(wc -l < "$CLEAN" | tr -d ' ')
-
-          # zbuduj plik Markdown
-          {
-            echo "## ${DATE} — usunięto ${COUNT} domen"
-            echo ""
-            echo "**$(date +'%Y-%m-%d %H:%M:%S %Z')**"
-            [ -n "$SRC_TS" ] && echo "_Źródło DNS.pl: ${SRC_TS}_"
-            echo ""
-            sed 's/^/- /' "$CLEAN"
-          } > "$MD"
-
-      - name: Commit and push
-        env:
-          TZ: Europe/Warsaw
+      - name: Commit and push changes
         run: |
-          DATE=$(date +'%Y-%m-%d')
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data
-          git commit -m "Auto-update: deleted domains for ${DATE}" || echo "No changes to commit"
+          git add data/
+          git commit -m "auto-update: $(date '+%Y-%m-%d %H:%M:%S %z')" || echo "No changes to commit"
           git push
