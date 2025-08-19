@@ -2,7 +2,7 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # codziennie 08:00 UTC (10:00 PL)
+    - cron: "0 8 * * *"     # codziennie 08:00 UTC (10:00 PL)
   workflow_dispatch:
 
 permissions:
@@ -26,32 +26,45 @@ jobs:
       - name: Run update script
         run: python update.py
 
-      - name: Update index
-        shell: bash
+      - name: Update index (repo /data)
         run: |
-          set -euo pipefail
           INDEX="data/index.md"
-          {
-            echo "# 📅 Historia usuniętych domen (.pl)"
-            echo
-            echo "Lista wszystkich dni z raportem:"
-            echo
-          } > "$INDEX"
-
-          # Lista dni (pomijamy sam index.md)
-          for f in $(ls -1 data/*.md | sort -r); do
-            base="$(basename "$f")"
-            [ "$base" = "index.md" ] && continue
-            DATE="${base%.md}"
-            # zliczamy tylko linie listy w formacie "- domena.pl"
-            COUNT="$(awk '/^- .+\.pl$/ {c++} END {print c+0}' "$f")"
+          echo "# 📅 Historia usuniętych domen (.pl)" > "$INDEX"
+          echo >> "$INDEX"
+          echo "Lista wszystkich dni, dla których opublikowano usunięte domeny:" >> "$INDEX"
+          echo >> "$INDEX"
+          for f in $(ls data/*.md | grep -v '^data/index\.md$' | sort -r); do
+            DATE=$(basename "$f" .md)
+            COUNT=$(grep -c '\.pl$' "$f")
             echo "- [${DATE}](./${DATE}.md) — usunięto ${COUNT} domen" >> "$INDEX"
           done
+
+      - name: Publish GitHub Pages (repo /docs)
+        run: |
+          mkdir -p docs/days
+          # skopiuj dzienne raporty do strony
+          cp data/*.md docs/days/
+          # zbuduj landing na Pages
+          {
+            echo "# 🗂️ Historia usuniętych domen (.pl)"
+            echo
+            echo "Lista wszystkich dni:"
+            echo
+            for f in $(ls data/*.md | grep -v '^data/index\.md$' | sort -r); do
+              DATE=$(basename "$f" .md)
+              COUNT=$(grep -c '\.pl$' "$f")
+              echo "- [${DATE}](days/${DATE}.md) — usunięto ${COUNT} domen"
+            done
+            echo
+            echo "> Generowane automatycznie przez GitHub Actions."
+          } > docs/index.md
+          # wyłącz Jekylla (żeby nie wtrącał się w ścieżki)
+          touch docs/.nojekyll
 
       - name: Commit and push changes
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add data/ docs/
           git commit -m "auto-update: $(date '+%Y-%m-%d %H:%M:%S %z')" || echo "No changes to commit"
           git push
