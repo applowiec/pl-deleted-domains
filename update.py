@@ -1,82 +1,139 @@
 #!/usr/bin/env python3
-import os, time, requests, sys
-from pathlib import Path
-from datetime import datetime
+import os
+import re
+import sys
+import time
+import datetime as dt
+from typing import List, Tuple
+
+import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-os.environ["TZ"] = "Europe/Warsaw"
 try:
-    time.tzset()
+    # Retry dla 429/5xx
+    from urllib3.util.retry import Retry
 except Exception:
-    pass
+    Retry = None  # będzie bez retry, ale spróbujemy
 
-URL = "https://dns.pl/deleted_domains.txt"
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+DNS_URL = "https://dns.pl/deleted_domains.txt"
+DATA_DIR = "data"
 
-today = datetime.now().strftime("%Y-%m-%d")
-raw_txt = DATA_DIR / f"{today}.txt"
-md_file = DATA_DIR / f"{today}.md"
+# Prosty parser — plik z NASK zwykle zawiera datę / timestamp i listę domen (po jednej w linii).
+# Robimy parser: odrzucamy puste linie i wszystko co nie wygląda na domenę .pl
+DOMAIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*\.pl$", re.IGNORECASE)
 
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "pl-deleted-domains (+https://github.com/applowiec/pl-deleted-domains) contact: actions@users.noreply.github.com",
-    "Accept": "text/plain,*/*;q=0.1",
-    "Connection": "close",
-})
+def session_with_retry() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "pl-deleted-domains/1.0 (+https://github.com/applowiec/pl-deleted-domains)",
+        "Accept": "text/plain,*/*;q=0.1",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+    })
+    if Retry is not None:
+        retry = Retry(
+            total=5,
+            connect=5,
+            read=5,
+            backoff_factor=0.8,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset(["GET"]),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        s.mount("http://", adapter)
+        s.mount("https://", adapter)
+    return s
 
-retry = Retry(
-    total=6,
-    connect=6,
-    read=6,
-    backoff_factor=1.0,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"],
-    raise_on_status=False,
-)
-session.mount("https://", HTTPAdapter(max_retries=retry))
-session.mount("http://", HTTPAdapter(max_retries=retry))
+def fetch_deleted_domains() -> Tuple[str, List[str], str]:
+    """Zwraca (data_iso, lista_domen, source_timestamp)
+       data_iso – YYYY-MM-DD (wg strefy Europe/Warsaw)
+       source_timestamp – ewentualny timestamp z nagłówka źródła (gdy uda się wykryć)"""
+    s = session_with_retry()
+    resp = s.get(DNS_URL, timeout=20)
+    if resp.status_code != 200 or not resp.text.strip():
+        raise RuntimeError(f"HTTP {resp.status_code} przy pobieraniu {DNS_URL}")
 
-try:
-    resp = session.get(URL, timeout=30)
-except Exception as e:
-    print(f"[ERR] request error: {e}", file=sys.stderr)
-    sys.exit(1)
+    raw = resp.text.splitlines()
+    lines = [ln.strip() for ln in raw if ln.strip()]
 
-print(f"[INFO] GET {URL} -> HTTP {resp.status_code}, {len(resp.content)} bytes")
+    # Spróbuj wyłuskać linię z datą/timestampem (zazwyczaj pierwsze 1-2 linie to data/czas).
+    # Jeśli nic sensownego – użyj „dzisiejszej” daty wg Europe/Warsaw.
+    source_ts = ""
+    possible_header = lines[0] if lines else ""
+    # Przyjmijmy, że jeśli linia zaczyna się od YYYY-MM-DD – to to jest data/ts.
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})(?:\b.*)?$", possible_header)
+    if m:
+        source_ts = possible_header
+        date_iso = m.group(1)
+        start_idx = 1  # domeny zaczynają się od następnej linii
+    else:
+        # Nie udało się wyczytać daty z nagłówka – bierz dzisiejszą (Warszawa)
+        try:
+            import zoneinfo
+            tz = zoneinfo.ZoneInfo("Europe/Warsaw")
+        except Exception:
+            # fallback: bez zoneinfo
+            class _TZ(dt.tzinfo):
+                def utcoffset(self, d): return dt.timedelta(hours=2)  # przybliżenie
+            tz = _TZ()
+        date_iso = dt.datetime.now(tz=tz).strftime("%Y-%m-%d")
+        start_idx = 0
 
-if resp.status_code in (401, 403, 429, 503):
-    print(f"[WARN] Server refused (status {resp.status_code}). Exiting without changes.")
-    sys.exit(0)
-
-resp.raise_for_status()
-
-text = resp.text.strip("\n\r")
-if not text:
-    print("[WARN] Empty response body; exiting without changes.")
-    sys.exit(0)
-
-lines = text.splitlines()
-if not lines:
-    print("[WARN] No lines in response; exiting without changes.")
-    sys.exit(0)
-
-src_ts = lines[0].strip()
-domains = [ln.strip() for ln in lines[1:] if ln.strip()]
-
-raw_txt.write_text(("\n".join(domains) + "\n") if domains else "", encoding="utf-8")
-
-count = len(domains)
-now_str = time.strftime("%Y-%m-%d %H:%M:%S %Z")
-
-with md_file.open("w", encoding="utf-8") as f:
-    f.write(f"## {today} — usunięto {count} domen\n\n")
-    f.write(f"**{now_str}**\n")
-    if src_ts:
-        f.write(f"_Źródło DNS.pl: {src_ts}_\n")
-    f.write("\n")
+    # Przefiltruj linie domen
+    domains = [ln for ln in lines[start_idx:] if DOMAIN_RE.match(ln)]
+    # Usuń duplikaty zachowując kolejność (na wszelki)
+    seen = set()
+    uniq = []
     for d in domains:
-        f.write(f"- {d}\n")
+        if d.lower() not in seen:
+            uniq.append(d)
+            seen.add(d.lower())
+    return date_iso, uniq, source_ts
 
-print(f"[OK] saved: {raw_txt} and {md_file} (count={count})")
+def write_markdown(date_iso: str, domains: List[str], source_ts: str) -> str:
+    """Zapisuje data/YYYY-MM-DD.md. Zwraca ścieżkę pliku."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    md_path = os.path.join(DATA_DIR, f"{date_iso}.md")
+
+    header = f"# {date_iso} — usunięto {len(domains)} domen\n\n"
+    # Sekcja z „datą ze źródła” — jeżeli wykryliśmy, dodajemy JAKO TEKST, bez listy punktowanej.
+    extra = ""
+    if source_ts and not DOMAIN_RE.match(source_ts):
+        extra = f"{source_ts}\n\n"
+
+    # Lista punktowana tylko dla domen:
+    bullet = "\n".join(f"- {d}" for d in domains)
+
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(header)
+        if extra:
+            f.write(extra)
+        f.write(bullet)
+        f.write("\n")
+
+    # Dodatkowo prosta wersja TXT:
+    txt_path = os.path.join(DATA_DIR, f"{date_iso}.txt")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(domains) + "\n")
+
+    return md_path
+
+def main() -> int:
+    try:
+        date_iso, domains, source_ts = fetch_deleted_domains()
+    except Exception as e:
+        # Zgłoś błąd jasno – Actions pokaże to w logu
+        print(f"[ERROR] Nie udało się pobrać listy: {e}", file=sys.stderr)
+        return 2
+
+    if not domains:
+        print(f"[WARN] Brak domen do zapisania dla {date_iso}.")
+        # Nie uznajemy tego za błąd krytyczny – po prostu kończymy bez zmian.
+        return 0
+
+    path = write_markdown(date_iso, domains, source_ts)
+    print(f"[OK] Zapisano {len(domains)} domen do: {path}")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
