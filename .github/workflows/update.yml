@@ -1,0 +1,32 @@
+name: Update deleted domains
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # uruchamia się codziennie o 8:00 UTC (10:00 czasu PL)
+  workflow_dispatch:       # pozwala uruchomić ręcznie
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch deleted domains
+        run: |
+          mkdir -p data
+          DATE=$(date +'%Y-%m-%d')
+          FILE="data/${DATE}.txt"
+          curl -s https://dns.pl/deleted_domains.txt -o "$FILE"
+          COUNT=$(wc -l < "$FILE" | tr -d ' ')
+          echo "# ${DATE} — usunięto ${COUNT} domen" > "data/${DATE}.md"
+          echo "" >> "data/${DATE}.md"
+          cat "$FILE" >> "data/${DATE}.md"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git commit -m "Auto-update: deleted domains for $(date +'%Y-%m-%d')" || echo "No changes"
+          git push
