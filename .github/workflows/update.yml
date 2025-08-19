@@ -2,7 +2,7 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # codziennie o 10:00 czasu polskiego (08:00 UTC)
+    - cron: "0 8 * * *"   # codziennie 10:00 czasu PL (08:00 UTC)
   workflow_dispatch:
 
 permissions:
@@ -11,6 +11,9 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Europe/Warsaw
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -21,28 +24,34 @@ jobs:
           python-version: "3.x"
 
       - name: Install requirements
-        run: pip install requests
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
 
       - name: Run update script
-        run: python update.py
+        run: |
+          set -e
+          python update.py
 
       - name: Update index
         run: |
+          set -e
           INDEX="data/index.md"
           echo "# 📅 Historia usuniętych domen (.pl)" > "$INDEX"
           echo "" >> "$INDEX"
-          echo "Lista wszystkich dostępnych dni, dla których opublikowano usunięte domeny:" >> "$INDEX"
+          echo "Lista wszystkich dni z raportem:" >> "$INDEX"
           echo "" >> "$INDEX"
 
-          for f in $(ls data/*.md | sort -r); do
+          # Sort malejąco po dacie w nazwie pliku
+          for f in $(ls -1 data/*.md | sort -r); do
             DATE=$(basename "$f" .md)
-            COUNT=$(grep -c '\.pl$' "$f")
+            COUNT=$(grep -Ec '^[[:alnum:]][[:alnum:].-]*\.pl$' "$f" || true)
             echo "- [${DATE}](./${DATE}.md) — usunięto ${COUNT} domen" >> "$INDEX"
           done
 
       - name: Commit and push changes
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/
           git commit -m "auto-update: $(date '+%Y-%m-%d %H:%M:%S %z')" || echo "No changes to commit"
