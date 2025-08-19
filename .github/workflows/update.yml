@@ -2,8 +2,8 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # codziennie 08:00 UTC (10:00 PL)
-  workflow_dispatch:       # uruchomienie ręczne
+    - cron: "0 8 * * *"   # 08:00 UTC (10:00 PL)
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,30 +19,40 @@ jobs:
         env:
           TZ: Europe/Warsaw
         run: |
+          set -euo pipefail
           mkdir -p data
           DATE=$(date +'%Y-%m-%d')
-          FILE="data/${DATE}.txt"
+          RAW="data/${DATE}.txt"
+          CLEAN="data/${DATE}.list"
+          MD="data/${DATE}.md"
 
-          curl -s https://dns.pl/deleted_domains.txt -o "$FILE"
+          # pobierz plik DNS.pl
+          curl -fsSL https://dns.pl/deleted_domains.txt -o "$RAW"
 
-          # policz domeny
-          COUNT=$(wc -l < "$FILE" | tr -d ' ')
+          # weź pierwszy wiersz (znacznik czasu źródła), usuń CR
+          SRC_TS=$(head -n1 "$RAW" | tr -d '\r')
 
-          # nagłówek
-          echo "## ${DATE} — usunięto ${COUNT} domen" > "data/${DATE}.md"
+          # od drugiej linii: usuń puste wiersze/CR -> lista domen
+          tail -n +2 "$RAW" | tr -d '\r' | awk 'NF' > "$CLEAN"
 
-          # wiersz z datą JAKO ZWYKŁY AKAPIT (pogrubiony), nie element listy
-          echo "" >> "data/${DATE}.md"
-          echo "**$(date +'%Y-%m-%d %H:%M:%S %Z')**" >> "data/${DATE}.md"
-          echo "" >> "data/${DATE}.md"
+          # policz tylko domeny
+          COUNT=$(wc -l < "$CLEAN" | tr -d ' ')
 
-          # lista domen: każda w osobnym wierszu, zaczynamy listę dopiero tutaj
-          while IFS= read -r domain; do
-            [ -n "$domain" ] && echo "- $domain" >> "data/${DATE}.md"
-          done < "$FILE"
+          # zbuduj plik Markdown
+          {
+            echo "## ${DATE} — usunięto ${COUNT} domen"
+            echo ""
+            echo "**$(date +'%Y-%m-%d %H:%M:%S %Z')**"
+            [ -n "$SRC_TS" ] && echo "_Źródło DNS.pl: ${SRC_TS}_"
+            echo ""
+            sed 's/^/- /' "$CLEAN"
+          } > "$MD"
 
       - name: Commit and push
+        env:
+          TZ: Europe/Warsaw
         run: |
+          DATE=$(date +'%Y-%m-%d')
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data
