@@ -2,11 +2,11 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # uruchamia się codziennie o 08:00 UTC (10:00 czasu PL)
-  workflow_dispatch:       # pozwala uruchomić ręcznie
+    - cron: "0 8 * * *"   # codziennie 08:00 UTC (10:00 PL)
+  workflow_dispatch:       # uruchomienie ręczne
 
 permissions:
-  contents: write   # pozwala na commit/push do repozytorium
+  contents: write
 
 jobs:
   update:
@@ -16,24 +16,34 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Fetch deleted domains
+        env:
+          TZ: Europe/Warsaw
         run: |
           mkdir -p data
           DATE=$(date +'%Y-%m-%d')
           FILE="data/${DATE}.txt"
+
           curl -s https://dns.pl/deleted_domains.txt -o "$FILE"
+
+          # policz domeny
           COUNT=$(wc -l < "$FILE" | tr -d ' ')
+
+          # nagłówek
           echo "## ${DATE} — usunięto ${COUNT} domen" > "data/${DATE}.md"
+
+          # wiersz z datą JAKO ZWYKŁY AKAPIT (pogrubiony), nie element listy
           echo "" >> "data/${DATE}.md"
-          echo "$(date)" >> "data/${DATE}.md"
+          echo "**$(date +'%Y-%m-%d %H:%M:%S %Z')**" >> "data/${DATE}.md"
           echo "" >> "data/${DATE}.md"
-          # każda domena w osobnym wierszu jako lista
-          while read -r domain; do
-            echo "- $domain" >> "data/${DATE}.md"
+
+          # lista domen: każda w osobnym wierszu, zaczynamy listę dopiero tutaj
+          while IFS= read -r domain; do
+            [ -n "$domain" ] && echo "- $domain" >> "data/${DATE}.md"
           done < "$FILE"
 
       - name: Commit and push
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data
           git commit -m "Auto-update: deleted domains for ${DATE}" || echo "No changes to commit"
