@@ -2,14 +2,15 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # uruchamia się codziennie o 8:00 UTC (10:00 czasu PL)
+    - cron: "0 8 * * *"   # uruchamia się codziennie o 08:00 UTC (10:00 czasu PL)
   workflow_dispatch:       # pozwala uruchomić ręcznie
+
+permissions:
+  contents: write   # pozwala na commit/push do repozytorium
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -21,14 +22,19 @@ jobs:
           FILE="data/${DATE}.txt"
           curl -s https://dns.pl/deleted_domains.txt -o "$FILE"
           COUNT=$(wc -l < "$FILE" | tr -d ' ')
-          echo "# ${DATE} — usunięto ${COUNT} domen" > "data/${DATE}.md"
+          echo "## ${DATE} — usunięto ${COUNT} domen" > "data/${DATE}.md"
           echo "" >> "data/${DATE}.md"
-          cat "$FILE" >> "data/${DATE}.md"
+          echo "$(date)" >> "data/${DATE}.md"
+          echo "" >> "data/${DATE}.md"
+          # każda domena w osobnym wierszu jako lista
+          while read -r domain; do
+            echo "- $domain" >> "data/${DATE}.md"
+          done < "$FILE"
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
-          git commit -m "Auto-update: deleted domains for $(date +'%Y-%m-%d')" || echo "No changes"
+          git add data
+          git commit -m "Auto-update: deleted domains for ${DATE}" || echo "No changes to commit"
           git push
