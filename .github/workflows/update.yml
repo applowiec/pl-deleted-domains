@@ -2,7 +2,7 @@ name: Update deleted domains
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # codziennie 10:00 czasu PL (08:00 UTC)
+    - cron: "0 8 * * *"   # codziennie 08:00 UTC (10:00 PL)
   workflow_dispatch:
 
 permissions:
@@ -11,9 +11,6 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      TZ: Europe/Warsaw
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -24,28 +21,30 @@ jobs:
           python-version: "3.x"
 
       - name: Install requirements
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests
 
       - name: Run update script
-        run: |
-          set -e
-          python update.py
+        run: python update.py
 
       - name: Update index
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           INDEX="data/index.md"
-          echo "# 📅 Historia usuniętych domen (.pl)" > "$INDEX"
-          echo "" >> "$INDEX"
-          echo "Lista wszystkich dni z raportem:" >> "$INDEX"
-          echo "" >> "$INDEX"
+          {
+            echo "# 📅 Historia usuniętych domen (.pl)"
+            echo
+            echo "Lista wszystkich dni z raportem:"
+            echo
+          } > "$INDEX"
 
-          # Sort malejąco po dacie w nazwie pliku
+          # Lista dni (pomijamy sam index.md)
           for f in $(ls -1 data/*.md | sort -r); do
-            DATE=$(basename "$f" .md)
-            COUNT=$(grep -Ec '^[[:alnum:]][[:alnum:].-]*\.pl$' "$f" || true)
+            base="$(basename "$f")"
+            [ "$base" = "index.md" ] && continue
+            DATE="${base%.md}"
+            # zliczamy tylko linie listy w formacie "- domena.pl"
+            COUNT="$(awk '/^- .+\.pl$/ {c++} END {print c+0}' "$f")"
             echo "- [${DATE}](./${DATE}.md) — usunięto ${COUNT} domen" >> "$INDEX"
           done
 
