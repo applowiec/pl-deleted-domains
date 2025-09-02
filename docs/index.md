@@ -2,6 +2,7 @@
 
 Lista wszystkich dni:
 
+- [2025-09-02](days/2025-09-02.md) — usunięto 2151 domen
 - [2025-09-01](days/2025-09-01.md) — usunięto 3401 domen
 - [2025-08-31](days/2025-08-31.md) — usunięto 2787 domen
 - [2025-08-30](days/2025-08-30.md) — usunięto 2341 domen
