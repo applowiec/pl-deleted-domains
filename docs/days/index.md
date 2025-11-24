@@ -2,6 +2,7 @@
 
 Lista wszystkich dni, dla których opublikowano usunięte domeny:
 
+- [2025-11-24](./2025-11-24.md) — usunięto 3110 domen
 - [2025-11-23](./2025-11-23.md) — usunięto 3115 domen
 - [2025-11-22](./2025-11-22.md) — usunięto 2688 domen
 - [2025-11-21](./2025-11-21.md) — usunięto 2938 domen
