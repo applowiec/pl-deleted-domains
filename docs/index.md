@@ -2,6 +2,7 @@
 
 Lista wszystkich dni:
 
+- [2026-07-17](days/2026-07-17.md) — usunięto 2814 domen
 - [2026-07-16](days/2026-07-16.md) — usunięto 2364 domen
 - [2026-07-15](days/2026-07-15.md) — usunięto 1951 domen
 - [2026-07-14](days/2026-07-14.md) — usunięto 1956 domen
