@@ -2,6 +2,7 @@
 
 Lista wszystkich dni, dla których opublikowano usunięte domeny:
 
+- [2026-11-27](./2026-11-27.md) — usunięto 3320 domen
 - [2026-11-26](./2026-11-26.md) — usunięto 3063 domen
 - [2026-11-25](./2026-11-25.md) — usunięto 2409 domen
 - [2026-11-24](./2026-11-24.md) — usunięto 2154 domen
